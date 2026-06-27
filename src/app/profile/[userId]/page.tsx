@@ -1,0 +1,740 @@
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
+import { useRouter, useParams } from 'next/navigation';
+import { type Post } from '@/lib/mockData';
+import { PassionGraph, type PassionItem } from '@/components/PassionGraph';
+import { MemoryCalendarTab, type HeatmapRow } from '@/components/MemoryCalendarTab';
+import PostCard from '@/components/PostCard';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
+import { getFriendshipStatus, type FriendshipStatus } from '@/lib/friendship';
+
+const RAINBOW = 'linear-gradient(135deg, #7C6FE8, #A855F7, #EC4899, #F97316, #EAB308, #22C55E, #3B82F6)';
+
+// ── カバー色（名前ハッシュで決定） ────────────────────────────────
+
+const COVER_PALETTES: [string, string][] = [
+  ['#2D1B69', '#0D2A5B'],
+  ['#1a0533', '#2D1A5C'],
+  ['#0D3A6B', '#061A35'],
+  ['#4A0D7A', '#200540'],
+  ['#5C2A00', '#2A1000'],
+  ['#0A3040', '#041520'],
+];
+
+function getCoverColors(name: string): [string, string] {
+  const idx = name.split('').reduce((sum, c) => sum + c.charCodeAt(0), 0) % COVER_PALETTES.length;
+  return COVER_PALETTES[idx];
+}
+
+function getRelativeTime(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const min  = Math.floor(diff / 60000);
+  const hour = Math.floor(diff / 3600000);
+  const day  = Math.floor(diff / 86400000);
+  if (min  < 1)  return 'たった今';
+  if (min  < 60) return `${min}分前`;
+  if (hour < 24) return `${hour}時間前`;
+  return `${day}日前`;
+}
+
+function isUrl(s: string | null | undefined): boolean {
+  return !!s && (s.startsWith('http://') || s.startsWith('https://'));
+}
+
+// ── 型定義 ────────────────────────────────────────────────────────
+
+type ProfileData = {
+  id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+  header_url: string | null;
+  bio: string | null;
+  hashtags: string[];
+};
+
+// ── ページ本体 ────────────────────────────────────────────────────
+
+export default function FriendProfilePage() {
+  const params        = useParams();
+  const profileUserId = params.userId as string;
+  const router        = useRouter();
+  const t             = useTranslations('profile');
+  const { user, followedHashtags } = useAuth();
+
+  // ── プロフィール
+  const [profileUser,    setProfileUser]    = useState<ProfileData | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+
+  useEffect(() => {
+    if (!profileUserId) return;
+    (async () => {
+      // まず UUID (id) で検索
+      const { data: byId } = await (supabase as any)
+        .from('profiles')
+        .select('id, username, display_name, avatar_url, header_url, bio, hashtags')
+        .eq('id', profileUserId)
+        .maybeSingle();
+      if (byId) { setProfileUser(byId); setProfileLoading(false); return; }
+
+      // 見つからなければ username で検索
+      const { data: byUsername } = await (supabase as any)
+        .from('profiles')
+        .select('id, username, display_name, avatar_url, header_url, bio, hashtags')
+        .eq('username', profileUserId)
+        .maybeSingle();
+      setProfileUser(byUsername ?? null);
+      setProfileLoading(false);
+    })();
+  }, [profileUserId]);
+
+  // ── HEAT MAP: hashtag_engagements から実データ取得
+  const [passionItems,   setPassionItems]   = useState<PassionItem[]>([]);
+  const [activeTab,      setActiveTab]      = useState<'posts' | 'memory'>('posts');
+  const [heatmapData,    setHeatmapData]    = useState<HeatmapRow[]>([]);
+  const [heatmapLoading, setHeatmapLoading] = useState(true);
+
+  useEffect(() => {
+    if (!profileUser?.id) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase.rpc as any)('get_hashtag_engagements_for_user', { p_user_id: profileUser.id })
+      .then(({ data }: { data: { tag: string; post_count: number; reaction_count: number }[] | null }) => {
+        const rows = data ?? [];
+        const total = rows.reduce((s, r) => s + r.post_count + r.reaction_count, 0);
+        if (total === 0) { setPassionItems([]); return; }
+        setPassionItems(
+          rows
+            .map(r => ({ tag: r.tag, pct: Math.round(((r.post_count + r.reaction_count) / total) * 100) }))
+            .sort((a, b) => b.pct - a.pct)
+        );
+      });
+  }, [profileUser?.id]);
+
+  // ── Memory Calendar: get_memory_heatmap RPC
+  useEffect(() => {
+    if (!profileUser?.id) return;
+    setHeatmapLoading(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase.rpc as any)('get_memory_heatmap', { p_user_id: profileUser.id })
+      .then(({ data }: { data: HeatmapRow[] | null }) => {
+        setHeatmapData(data ?? []);
+        setHeatmapLoading(false);
+      })
+      .catch(() => setHeatmapLoading(false));
+  }, [profileUser?.id]);
+
+  // ── 投稿リスト
+  const [posts,        setPosts]        = useState<Post[]>([]);
+  const [postsLoading, setPostsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!profileUser?.id) return;
+    setPostsLoading(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase.from('posts') as any)
+      .select('id, content, hashtags, color, is_mutual, expires_at, created_at')
+      .eq('user_id', profileUser.id)
+      .is('parent_id', null)
+      .gt('expires_at', new Date().toISOString())
+      .order('created_at', { ascending: false })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .then(({ data, error }: { data: any[] | null; error: any }) => {
+        if (error) console.error('投稿取得エラー:', error);
+        if (data && profileUser) {
+          setPosts(data.map(row => ({
+            id:        row.id,
+            avatar:    profileUser.avatar_url ?? '👤',
+            handle:    '@' + profileUser.username,
+            name:      profileUser.display_name,
+            content:   row.content,
+            hashtags:  row.hashtags ?? [],
+            time:      getRelativeTime(row.created_at),
+            createdAt: new Date(row.created_at).getTime(),
+            expiresAt: row.expires_at
+              ? new Date(row.expires_at).getTime()
+              : Date.now() + 999 * 24 * 60 * 60 * 1000,
+            isMutual:  row.is_mutual,
+          })));
+        }
+        setPostsLoading(false);
+      });
+  }, [profileUser?.id]);
+
+  // ── 共通ハッシュタグ
+  const [commonTags,       setCommonTags]       = useState<string[]>([]);
+  const [targetTagCount,   setTargetTagCount]   = useState(0);
+
+  useEffect(() => {
+    if (!profileUser?.id) return;
+    supabase
+      .from('follows')
+      .select('tag')
+      .eq('follower_id', profileUser.id)
+      .eq('type', 'hashtag')
+      .then(({ data }) => {
+        const targetTags = (data ?? []).map((r: { tag: string | null }) => r.tag).filter(Boolean) as string[];
+        setTargetTagCount(targetTags.length);
+        if (user && followedHashtags.length > 0) {
+          const targetSet = new Set(targetTags);
+          setCommonTags(followedHashtags.filter(t => targetSet.has(t)));
+        }
+      });
+  }, [profileUser?.id, user, followedHashtags]);
+
+  // ── ピン止め投稿
+  const [pinnedPosts, setPinnedPosts] = useState<Post[]>([]);
+
+  useEffect(() => {
+    if (!profileUser?.id) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase.from('pinned_posts') as any)
+      .select('order_index, posts(id, content, hashtags, color, is_mutual, expires_at, created_at)')
+      .eq('user_id', profileUser.id)
+      .order('order_index')
+      .limit(3)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .then(({ data }: { data: any[] | null }) => {
+        if (!data || !profileUser) return;
+        setPinnedPosts(
+          data
+            .filter(r => r.posts)
+            .map(r => ({
+              id:        r.posts.id,
+              avatar:    profileUser.avatar_url ?? '👤',
+              handle:    '@' + profileUser.username,
+              name:      profileUser.display_name,
+              content:   r.posts.content,
+              hashtags:  r.posts.hashtags ?? [],
+              time:      getRelativeTime(r.posts.created_at),
+              createdAt: new Date(r.posts.created_at).getTime(),
+              expiresAt: r.posts.expires_at
+                ? new Date(r.posts.expires_at).getTime()
+                : Date.now() + 999 * 24 * 60 * 60 * 1000,
+              isMutual:  r.posts.is_mutual,
+            }))
+        );
+      });
+  }, [profileUser?.id]);
+
+  // ── フォロー状態
+  const [friendshipStatus, setFriendshipStatus] = useState<FriendshipStatus>('none');
+  const [followLoading,    setFollowLoading]    = useState(false);
+
+  // ── 通報・ブロック
+  const [moreSheetOpen,   setMoreSheetOpen]   = useState(false);
+  const [reasonSheetOpen, setReasonSheetOpen] = useState(false);
+  const [toast,           setToast]           = useState('');
+
+  function showToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(''), 2500);
+  }
+
+  const REPORT_REASONS = ['スパム', '不適切なコンテンツ', '嫌がらせ', 'なりすまし', 'その他'];
+
+  async function handleReport(reason: string) {
+    setReasonSheetOpen(false);
+    setMoreSheetOpen(false);
+    if (user && profileUser) {
+      try {
+        await fetch('/api/report', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            contentId:       profileUser.id,
+            contentType:     'profile',
+            reason,
+            contentSnapshot: profileUser.display_name || profileUser.username,
+            reportedUserId:  profileUser.id,
+            reporterId:      user.id,
+          }),
+        });
+      } catch { /* エラー時も通報受付済みとして扱う */ }
+    }
+    showToast('通報を受け付けました');
+  }
+
+  function handleBlock() {
+    if (!profileUser) return;
+    setMoreSheetOpen(false);
+    try {
+      const raw = localStorage.getItem('sync_blocked_users');
+      const list: string[] = raw ? JSON.parse(raw) : [];
+      if (!list.includes(profileUser.id)) {
+        list.push(profileUser.id);
+        localStorage.setItem('sync_blocked_users', JSON.stringify(list));
+      }
+    } catch { /* ignore */ }
+    showToast('ブロックしました');
+    setTimeout(() => router.push('/home'), 1200);
+  }
+
+  const isOwnProfile = user?.id === profileUser?.id;
+
+  useEffect(() => {
+    if (!user || !profileUser) return;
+    getFriendshipStatus(supabase as any, user.id, profileUser.id)
+      .then(status => setFriendshipStatus(status));
+  }, [user, profileUser]);
+
+  const handleSendRequest = async () => {
+    if (!user || !profileUser || friendshipStatus !== 'none' || followLoading) return;
+    setFollowLoading(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.from('follows') as any).insert({
+      follower_id:  user.id,
+      following_id: profileUser.id,
+      type:         'user',
+      status:       'pending',
+    });
+    if (!error) setFriendshipStatus('request_sent');
+    else console.error('申請エラー:', error);
+    setFollowLoading(false);
+  };
+
+  const handleCancelRequest = async () => {
+    if (!user || !profileUser || followLoading) return;
+    setFollowLoading(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase.from('follows') as any)
+      .delete()
+      .eq('follower_id', user.id)
+      .eq('following_id', profileUser.id)
+      .eq('type', 'user')
+      .eq('status', 'pending');
+    setFriendshipStatus('none');
+    setFollowLoading(false);
+  };
+
+  const hashtagColor = typeof window !== 'undefined'
+    ? localStorage.getItem('sync_hashtag_color') || ''
+    : '';
+
+  const handleHashtagClick = useCallback((tag: string) => {
+    router.push(`/search?tag=${encodeURIComponent(tag.replace(/^#/, ''))}`);
+  }, [router]);
+
+  // ── ローディング中
+  if (profileLoading) return null;
+
+  // ── プロフィールが見つからない場合
+  if (!profileUser) {
+    return (
+      <div className="flex flex-col flex-1 items-center justify-center" style={{ color: 'var(--muted)' }}>
+        <p>ユーザーが見つかりません</p>
+        <button onClick={() => router.back()} className="mt-4 text-sm underline">戻る</button>
+      </div>
+    );
+  }
+
+  const [c1, c2] = getCoverColors(profileUser.display_name);
+  const avatarIsImg = isUrl(profileUser.avatar_url);
+
+  return (
+    <div
+      className="flex flex-col flex-1 min-h-0 overflow-y-auto"
+      style={{ background: 'var(--background)', paddingBottom: 80 }}
+    >
+      {/* ── カバー ─────────────────────────────────────────────── */}
+      <div className="relative flex-shrink-0">
+        <div
+          className="h-36 w-full"
+          style={profileUser.header_url ? undefined : {
+            background: `linear-gradient(135deg, ${c1} 0%, ${c2} 100%)`,
+          }}
+        >
+          {profileUser.header_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={profileUser.header_url}
+              alt="header"
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
+          ) : (
+            <div
+              className="absolute inset-0"
+              style={{ background: 'radial-gradient(ellipse at 65% 40%, rgba(255,26,26,0.10) 0%, transparent 65%)' }}
+            />
+          )}
+        </div>
+
+        {/* 戻るボタン + ⋯ボタン */}
+        <div
+          className="absolute top-0 left-0 right-0 flex items-center justify-between px-3"
+          style={{ paddingTop: 'max(env(safe-area-inset-top, 12px), 12px)', paddingBottom: 8 }}
+        >
+          <button
+            onClick={() => router.back()}
+            className="w-9 h-9 flex items-center justify-center rounded-full active:scale-90 transition-transform"
+            style={{ background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(6px)' }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.5} className="w-5 h-5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+            </svg>
+          </button>
+          {!isOwnProfile && (
+            <button
+              onClick={() => setMoreSheetOpen(true)}
+              className="w-9 h-9 flex items-center justify-center rounded-full active:scale-90 transition-transform"
+              style={{ background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(6px)', color: 'white', fontSize: 18, fontWeight: 700, letterSpacing: 2 }}
+            >
+              ⋯
+            </button>
+          )}
+        </div>
+
+        {/* アバター */}
+        <div className="absolute left-4" style={{ bottom: '-36px' }}>
+          <div
+            className="w-20 h-20 rounded-full flex items-center justify-center text-4xl overflow-hidden"
+            style={{
+              background: 'var(--surface-2)',
+              border: '3px solid var(--background)',
+              boxShadow: '0 2px 12px rgba(0,0,0,0.3)',
+            }}
+          >
+            {avatarIsImg ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={profileUser.avatar_url!}
+                alt="avatar"
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            ) : (
+              profileUser.avatar_url ?? '👤'
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── プロフィール情報 ─────────────────────────────────────── */}
+      <div
+        className="px-4 pt-14 pb-4 flex-shrink-0"
+        style={{ borderBottom: '1px solid var(--surface-2)' }}
+      >
+        {/* ボタン行 */}
+        <div className="flex items-center justify-end gap-2 mb-3">
+          {friendshipStatus === 'none' && (
+            <button
+              onClick={handleSendRequest}
+              disabled={followLoading}
+              className="px-4 py-1.5 rounded-full text-sm font-bold active:scale-[0.97] transition-transform"
+              style={{
+                background: RAINBOW,
+                color: '#0d0d1a',
+                opacity: followLoading ? 0.6 : 1,
+              }}
+            >
+              {followLoading ? '処理中...' : t('connect')}
+            </button>
+          )}
+          {friendshipStatus === 'request_sent' && (
+            <button
+              onClick={handleCancelRequest}
+              disabled={followLoading}
+              className="px-4 py-1.5 rounded-full text-sm font-bold active:scale-[0.97] transition-transform"
+              style={{
+                background: '#f59e0b',
+                color: '#0d0d1a',
+                opacity: followLoading ? 0.6 : 1,
+              }}
+            >
+              申請中
+            </button>
+          )}
+          {friendshipStatus === 'request_received' && (
+            <button
+              disabled
+              className="px-4 py-1.5 rounded-full text-sm font-bold"
+              style={{
+                background: 'var(--surface-2)',
+                border: '1px solid var(--surface-2)',
+                color: 'var(--muted)',
+                cursor: 'default',
+              }}
+            >
+              承認待ち
+            </button>
+          )}
+          {friendshipStatus === 'friends' && (
+            <button
+              disabled
+              className="px-4 py-1.5 rounded-full text-sm font-bold"
+              style={{
+                background: 'var(--surface-2)',
+                border: '1px solid var(--surface-2)',
+                color: 'var(--muted)',
+                cursor: 'default',
+              }}
+            >
+              {t('friends')}
+            </button>
+          )}
+          <button
+            onClick={() => router.push(`/chat/${profileUser.id}`)}
+            className="px-4 py-1.5 rounded-full text-sm font-bold active:scale-[0.97] transition-transform"
+            style={{ background: '#118AB2', color: '#fff' }}
+          >
+            DM
+          </button>
+        </div>
+
+        <h1 className="text-base font-black leading-tight" style={{ color: 'var(--foreground)' }}>
+          {profileUser.display_name}
+        </h1>
+        <p className="text-sm mt-0.5" style={{ color: 'var(--muted)' }}>
+          @{profileUser.username}
+        </p>
+        {profileUser.bio && (
+          <p className="text-sm mt-2 leading-relaxed" style={{ color: 'rgba(255,255,255,0.6)' }}>
+            {profileUser.bio}
+          </p>
+        )}
+
+        {/* ── フォロー中タグ数 + 共通タグ */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14 }}>
+          {/* フォロー中のハッシュタグ数 */}
+          <div style={{ color: '#aaa', fontSize: 13 }}>
+            フォロー中のハッシュタグ：
+            <span style={{ color: '#fff', fontWeight: 600, marginLeft: 4 }}>
+              {targetTagCount}
+            </span>
+          </div>
+
+          {/* 共通タグ */}
+          {commonTags.length > 0 && (
+            <div>
+              <div style={{ color: '#aaa', fontSize: 12, marginBottom: 8 }}>共通のハッシュタグ</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {commonTags.slice(0, 5).map(tag => (
+                  <button
+                    key={tag}
+                    onClick={() => handleHashtagClick(tag)}
+                    style={hashtagColor ? {
+                      background: 'transparent',
+                      border: `1.5px solid ${hashtagColor}`,
+                      color: '#fff',
+                      borderRadius: 20,
+                      padding: '4px 12px',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    } : {
+                      background: 'linear-gradient(var(--surface), var(--surface)) padding-box, linear-gradient(90deg,#FF6B6B,#FFD93D,#6BCB77,#4D96FF,#9B59B6) border-box',
+                      border: '1.5px solid transparent',
+                      color: '#fff',
+                      borderRadius: 20,
+                      padding: '4px 12px',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── PassionGraph */}
+        {passionItems.length > 0 && (
+          <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--surface-2)' }}>
+            <PassionGraph items={passionItems} />
+          </div>
+        )}
+      </div>
+
+      {/* ── タブバー ─────────────────────────────────────────────── */}
+      <div
+        className="flex items-center flex-shrink-0 sticky top-0 z-30"
+        style={{ background: 'var(--background)', borderBottom: '1px solid var(--surface-2)' }}
+      >
+        <button
+          onClick={() => setActiveTab('posts')}
+          className="flex-1 py-3 flex items-center justify-center transition-all active:opacity-70 relative"
+          style={{ color: activeTab === 'posts' ? '#7C6FE8' : 'var(--muted)' }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
+          </svg>
+          {activeTab === 'posts' && (
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 2, background: RAINBOW }} />
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab('memory')}
+          className="flex-1 py-3 flex items-center justify-center transition-all active:opacity-70 relative"
+          style={{ color: activeTab === 'memory' ? '#7C6FE8' : 'var(--muted)' }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+          </svg>
+          {activeTab === 'memory' && (
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 2, background: RAINBOW }} />
+          )}
+        </button>
+      </div>
+
+      {/* ── 投稿タブ ─────────────────────────────────────────────── */}
+      {activeTab === 'posts' && (
+        <>
+          {pinnedPosts.length > 0 && (
+            <div className="flex-shrink-0">
+              <div style={{ padding: '16px 16px 12px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ color: '#fff', fontWeight: 700, fontSize: 14 }}>📌 ピン止め</span>
+              </div>
+              {pinnedPosts.map(post => (
+                <PostCard
+                  key={post.id}
+                  post={post}
+                  onHashtagClick={handleHashtagClick}
+                  onUserClick={() => {}}
+                  hashtagBorderColor={hashtagColor || undefined}
+                />
+              ))}
+              <div style={{ height: 1, background: 'var(--surface-2)', margin: '4px 0 0' }} />
+            </div>
+          )}
+
+          <div className="flex-shrink-0 px-4 pt-4 pb-1">
+            <p className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--muted)' }}>Posts</p>
+          </div>
+
+          <div className="flex flex-col pb-10">
+            {postsLoading ? (
+              <div className="py-12 text-center">
+                <p className="text-sm" style={{ color: 'var(--muted)' }}>Loading...</p>
+              </div>
+            ) : posts.length === 0 ? (
+              <div className="py-12 text-center">
+                <p className="text-sm" style={{ color: 'var(--muted)' }}>投稿がありません</p>
+              </div>
+            ) : (
+              posts.map(post => (
+                <PostCard
+                  key={post.id}
+                  post={post}
+                  onHashtagClick={handleHashtagClick}
+                  onUserClick={() => {}}
+                  hashtagBorderColor={hashtagColor || undefined}
+                />
+              ))
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ── メモリータブ ─────────────────────────────────────────── */}
+      {activeTab === 'memory' && (
+        <MemoryCalendarTab heatmapData={heatmapData} loading={heatmapLoading} />
+      )}
+
+      {/* ── トースト ──────────────────────────────────────────────── */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 100, left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(30,30,50,0.95)', color: '#fff',
+          padding: '10px 20px', borderRadius: 20, fontSize: 13, fontWeight: 600,
+          zIndex: 200, backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,0.1)',
+          whiteSpace: 'nowrap',
+        }}>
+          {toast}
+        </div>
+      )}
+
+      {/* ── ⋯ ボトムシート ────────────────────────────────────────── */}
+      {moreSheetOpen && (
+        <>
+          <div
+            className="absolute inset-0 z-40 bg-black/60"
+            onClick={() => setMoreSheetOpen(false)}
+          />
+          <div
+            className="absolute bottom-0 left-0 right-0 z-50 rounded-t-3xl overflow-hidden"
+            style={{ background: '#1a1a2e' }}
+          >
+            <div className="flex justify-center pt-3 pb-1">
+              <div className="w-10 h-1 rounded-full" style={{ background: 'rgba(255,255,255,0.15)' }} />
+            </div>
+            <div className="pb-8 pt-2">
+              {[
+                { icon: '🚨', label: '通報する', color: '#E84040', action: () => { setMoreSheetOpen(false); setReasonSheetOpen(true); } },
+                { icon: '🚫', label: 'ブロックする', color: '#FF6B35', action: handleBlock },
+              ].map(({ icon, label, color, action }) => (
+                <button
+                  key={label}
+                  onClick={action}
+                  className="w-full flex items-center gap-4 px-5 py-4 active:opacity-60 transition-opacity"
+                  style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+                >
+                  <div
+                    className="w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0"
+                    style={{ background: `${color}22` }}
+                  >
+                    {icon}
+                  </div>
+                  <span className="text-sm font-semibold" style={{ color }}>{label}</span>
+                </button>
+              ))}
+              <button
+                onClick={() => setMoreSheetOpen(false)}
+                className="w-full py-4 text-sm font-medium active:opacity-60"
+                style={{ color: 'var(--muted)' }}
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── 通報理由シート ─────────────────────────────────────────── */}
+      {reasonSheetOpen && (
+        <>
+          <div
+            className="absolute inset-0 z-40 bg-black/60"
+            onClick={() => setReasonSheetOpen(false)}
+          />
+          <div
+            className="absolute bottom-0 left-0 right-0 z-50 rounded-t-3xl overflow-hidden"
+            style={{ background: '#1a1a2e' }}
+          >
+            <div className="flex justify-center pt-3 pb-1">
+              <div className="w-10 h-1 rounded-full" style={{ background: 'rgba(255,255,255,0.15)' }} />
+            </div>
+            <p className="text-sm font-bold px-5 pt-3 pb-3" style={{ color: 'var(--foreground)' }}>
+              通報理由を選択
+            </p>
+            <div className="pb-8">
+              {REPORT_REASONS.map(reason => (
+                <button
+                  key={reason}
+                  onClick={() => handleReport(reason)}
+                  className="w-full flex items-center px-5 py-4 active:opacity-60 transition-opacity"
+                  style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+                >
+                  <span className="text-sm" style={{ color: 'var(--foreground)' }}>{reason}</span>
+                  <svg className="ml-auto" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--muted)' }}>
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
+                </button>
+              ))}
+              <button
+                onClick={() => setReasonSheetOpen(false)}
+                className="w-full py-4 text-sm font-medium active:opacity-60"
+                style={{ color: 'var(--muted)' }}
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
