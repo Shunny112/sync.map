@@ -6,7 +6,9 @@ import 'dart:ui_web' as ui_web;
 import 'package:flutter/material.dart';
 
 class GoogleJapanMap extends StatefulWidget {
-  const GoogleJapanMap({super.key});
+  const GoogleJapanMap({super.key, this.borderRadius = BorderRadius.zero});
+
+  final BorderRadius borderRadius;
 
   @override
   State<GoogleJapanMap> createState() => _GoogleJapanMapState();
@@ -23,12 +25,14 @@ class _GoogleJapanMapState extends State<GoogleJapanMap> {
 
     ui_web.platformViewRegistry.registerViewFactory(_viewType, (int viewId) {
       return html.IFrameElement()
-        ..src = 'https://www.google.com/maps?q=Japan&z=5&output=embed'
+        ..src =
+            'https://www.google.com/maps?q=Shibuya,Tokyo,Japan&z=16&output=embed'
         ..style.border = '0'
         ..style.width = '100%'
         ..style.height = '100%'
-        ..style.borderRadius = '8px'
+        ..title = 'Google map centered on Shibuya, Tokyo'
         ..setAttribute('allowfullscreen', 'true')
+        ..setAttribute('aria-label', 'Google map centered on Shibuya, Tokyo')
         ..setAttribute('loading', 'lazy')
         ..setAttribute('referrerpolicy', 'no-referrer-when-downgrade');
     });
@@ -38,7 +42,7 @@ class _GoogleJapanMapState extends State<GoogleJapanMap> {
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: widget.borderRadius,
       child: Stack(
         children: [
           const Positioned.fill(child: HtmlElementView(viewType: _viewType)),
@@ -55,7 +59,7 @@ class _GoogleJapanMapState extends State<GoogleJapanMap> {
               ),
               child: const Row(
                 children: [
-                  Icon(Icons.public, color: Color(0xFF80FFD2), size: 17),
+                  Icon(Icons.public, color: Color(0xFF10B981), size: 17),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(

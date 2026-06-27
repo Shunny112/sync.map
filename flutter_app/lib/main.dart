@@ -34,9 +34,11 @@ class SyncColors {
   static const voidBlack = Color(0xFF08080A);
   static const panel = Color(0xFF15151A);
   static const panelSoft = Color(0xFF202026);
-  static const heat = Color(0xFFFF4D2E);
-  static const pulse = Color(0xFFFFB84D);
-  static const mint = Color(0xFF80FFD2);
+  static const heat = Color(0xFFF97316);
+  static const pulse = Color(0xFFFDBA74);
+  static const mint = Color(0xFF10B981);
+  static const zenlyLime = Color(0xFFA3E635);
+  static const sky = Color(0xFF38BDF8);
   static const ink = Color(0xFFF6F1E8);
   static const muted = Color(0xFF9B98A5);
 }
@@ -83,73 +85,124 @@ class _SyncShellState extends State<SyncShell> {
           distance: '0m',
         ),
       );
-      _selectedIndex = 0;
+      _selectedIndex = 2;
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final pages = [
-      HomeTab(posts: _posts, onPost: _addPost),
+      const MapTab(),
       const ChatTab(),
-      const SearchTab(),
+      HomeTab(posts: _posts, onPost: _addPost),
       const ProfileTab(),
     ];
 
     return Scaffold(
-      body: DecoratedBox(
-        decoration: const BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment(-0.78, -0.9),
-            radius: 1.2,
-            colors: [Color(0xFF3B1711), SyncColors.voidBlack],
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: _selectedIndex == 0
+                ? pages[_selectedIndex]
+                : DecoratedBox(
+                    decoration: const BoxDecoration(
+                      gradient: RadialGradient(
+                        center: Alignment(-0.78, -0.9),
+                        radius: 1.2,
+                        colors: [Color(0xFF3B1711), SyncColors.voidBlack],
+                      ),
+                    ),
+                    child: SafeArea(
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 520),
+                          child: Column(
+                            children: [
+                              const SyncHeader(),
+                              Expanded(child: pages[_selectedIndex]),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
           ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: Column(
-                children: [
-                  const SyncHeader(),
-                  Expanded(child: pages[_selectedIndex]),
-                ],
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 12,
+            child: SafeArea(
+              top: false,
+              child: _SyncNavBar(
+                selectedIndex: _selectedIndex,
+                onDestinationSelected: (index) {
+                  setState(() => _selectedIndex = index);
+                },
               ),
             ),
           ),
-        ),
+        ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex,
-        height: 70,
-        backgroundColor: SyncColors.voidBlack,
-        indicatorColor: SyncColors.heat.withValues(alpha: 0.2),
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-        onDestinationSelected: (index) {
-          setState(() => _selectedIndex = index);
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.sensors_outlined),
-            selectedIcon: Icon(Icons.sensors),
-            label: 'Now',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.chat_bubble_outline),
-            selectedIcon: Icon(Icons.chat_bubble),
-            label: 'Chat',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.search),
-            selectedIcon: Icon(Icons.travel_explore),
-            label: 'Search',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: 'Profile',
+    );
+  }
+}
+
+class _SyncNavBar extends StatelessWidget {
+  const _SyncNavBar({
+    required this.selectedIndex,
+    required this.onDestinationSelected,
+  });
+
+  final int selectedIndex;
+  final ValueChanged<int> onDestinationSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: SyncColors.voidBlack.withValues(alpha: 0.88),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.35),
+            blurRadius: 22,
+            offset: const Offset(0, 12),
           ),
         ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: NavigationBar(
+          selectedIndex: selectedIndex,
+          height: 64,
+          backgroundColor: Colors.transparent,
+          indicatorColor: SyncColors.heat.withValues(alpha: 0.24),
+          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+          onDestinationSelected: onDestinationSelected,
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.map_outlined),
+              selectedIcon: Icon(Icons.map),
+              label: 'Map',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.chat_bubble_outline),
+              selectedIcon: Icon(Icons.chat_bubble),
+              label: 'Chat',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.sensors_outlined),
+              selectedIcon: Icon(Icons.sensors),
+              label: 'Feed',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.person_outline),
+              selectedIcon: Icon(Icons.person),
+              label: 'Profile',
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -221,6 +274,528 @@ class SyncHeader extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class MapTab extends StatelessWidget {
+  const MapTab({super.key});
+
+  static const _people = [
+    PersonGps(
+      name: 'Mika',
+      handle: '@mika.run',
+      mood: 'morning run',
+      distance: '18m',
+      heat: 92,
+      latitude: 35.6595,
+      longitude: 139.7005,
+      position: Alignment(-0.18, -0.16),
+      color: SyncColors.zenlyLime,
+    ),
+    PersonGps(
+      name: 'Ren',
+      handle: '@ren.sound',
+      mood: 'live music',
+      distance: '34m',
+      heat: 76,
+      latitude: 35.6612,
+      longitude: 139.7039,
+      position: Alignment(0.2, 0.02),
+      color: SyncColors.sky,
+    ),
+    PersonGps(
+      name: 'Aoi',
+      handle: '@aoi.design',
+      mood: 'design talk',
+      distance: '47m',
+      heat: 81,
+      latitude: 35.6579,
+      longitude: 139.6968,
+      position: Alignment(-0.48, 0.18),
+      color: SyncColors.pulse,
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: Semantics(
+            label:
+                'Google map centered on Shibuya, Tokyo, with nearby people markers',
+            child: GoogleJapanMap(),
+          ),
+        ),
+        Positioned.fill(
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    SyncColors.voidBlack.withValues(alpha: 0.36),
+                    Colors.transparent,
+                    SyncColors.voidBlack.withValues(alpha: 0.5),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned.fill(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return Stack(
+                children: [
+                  for (final person in _people)
+                    PersonGpsMarker(
+                      person: person,
+                      left:
+                          (person.position.x + 1) * constraints.maxWidth / 2 -
+                          34,
+                      top:
+                          (person.position.y + 1) * constraints.maxHeight / 2 -
+                          48,
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+        Positioned(
+          left: 18,
+          right: 18,
+          top: 0,
+          child: const SafeArea(bottom: false, child: MapLocationHeader()),
+        ),
+        const Positioned(
+          right: 18,
+          top: 118,
+          child: SafeArea(bottom: false, child: MapActionRail()),
+        ),
+        Positioned(
+          left: 18,
+          right: 18,
+          bottom: 88,
+          child: SafeArea(
+            top: false,
+            child: Semantics(
+              container: true,
+              label: 'Nearby people list with GPS coordinates',
+              child: NearbyPeopleSheet(people: _people),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class PersonGps {
+  const PersonGps({
+    required this.name,
+    required this.handle,
+    required this.mood,
+    required this.distance,
+    required this.heat,
+    required this.latitude,
+    required this.longitude,
+    required this.position,
+    required this.color,
+  });
+
+  final String name;
+  final String handle;
+  final String mood;
+  final String distance;
+  final int heat;
+  final double latitude;
+  final double longitude;
+  final Alignment position;
+  final Color color;
+}
+
+class MapLocationHeader extends StatelessWidget {
+  const MapLocationHeader({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: SyncColors.zenlyLime,
+                      borderRadius: BorderRadius.circular(9),
+                      boxShadow: [
+                        BoxShadow(
+                          color: SyncColors.zenlyLime.withValues(alpha: 0.45),
+                          blurRadius: 18,
+                        ),
+                      ],
+                    ),
+                    child: const Icon(
+                      Icons.near_me,
+                      color: SyncColors.voidBlack,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: SyncColors.voidBlack.withValues(alpha: 0.72),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.12),
+                      ),
+                    ),
+                    child: const Text(
+                      '22°C  clear',
+                      style: TextStyle(
+                        color: SyncColors.ink,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'shibuya',
+                style: TextStyle(
+                  color: SyncColors.ink,
+                  fontSize: MediaQuery.textScalerOf(context).scale(38),
+                  height: 0.92,
+                  fontWeight: FontWeight.w900,
+                  shadows: [
+                    Shadow(
+                      color: Colors.black.withValues(alpha: 0.42),
+                      blurRadius: 16,
+                      offset: const Offset(0, 5),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: SyncColors.voidBlack.withValues(alpha: 0.78),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: SyncColors.mint.withValues(alpha: 0.28),
+                  ),
+                ),
+                child: const Text(
+                  '3 friends live nearby',
+                  style: TextStyle(
+                    color: SyncColors.mint,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class MapActionRail extends StatelessWidget {
+  const MapActionRail({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      children: [
+        MapRoundButton(icon: Icons.search, label: 'Search map'),
+        SizedBox(height: 10),
+        MapRoundButton(icon: Icons.my_location, label: 'Center on me'),
+        SizedBox(height: 10),
+        MapRoundButton(icon: Icons.layers_outlined, label: 'Map layers'),
+      ],
+    );
+  }
+}
+
+class MapRoundButton extends StatelessWidget {
+  const MapRoundButton({super.key, required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: label,
+      child: Container(
+        width: 46,
+        height: 46,
+        decoration: BoxDecoration(
+          color: SyncColors.voidBlack.withValues(alpha: 0.84),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.3),
+              blurRadius: 14,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Icon(icon, color: SyncColors.ink, size: 22),
+      ),
+    );
+  }
+}
+
+class PersonGpsMarker extends StatelessWidget {
+  const PersonGpsMarker({
+    super.key,
+    required this.person,
+    required this.left,
+    required this.top,
+  });
+
+  final PersonGps person;
+  final double left;
+  final double top;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: left,
+      top: top,
+      child: Semantics(
+        label:
+            '${person.name}, ${person.distance} away, ${person.mood}, GPS ${person.latitude.toStringAsFixed(4)}, ${person.longitude.toStringAsFixed(4)}',
+        child: Column(
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              alignment: Alignment.center,
+              children: [
+                Container(
+                  width: 66,
+                  height: 66,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: person.color.withValues(alpha: 0.2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: person.color.withValues(alpha: 0.35),
+                        blurRadius: 22,
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        person.color,
+                        person.color.withValues(alpha: 0.62),
+                      ],
+                    ),
+                    border: Border.all(color: Colors.white, width: 3),
+                  ),
+                  child: Center(
+                    child: Text(
+                      person.name.characters.first,
+                      style: const TextStyle(
+                        color: SyncColors.voidBlack,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  right: -18,
+                  top: -8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: SyncColors.voidBlack.withValues(alpha: 0.88),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.12),
+                      ),
+                    ),
+                    child: Text(
+                      person.distance,
+                      style: const TextStyle(
+                        color: SyncColors.ink,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 5),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+              decoration: BoxDecoration(
+                color: SyncColors.voidBlack.withValues(alpha: 0.86),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+              ),
+              child: Text(
+                '#${person.mood}',
+                style: const TextStyle(
+                  color: SyncColors.ink,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class NearbyPeopleSheet extends StatelessWidget {
+  const NearbyPeopleSheet({super.key, required this.people});
+
+  final List<PersonGps> people;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: SyncColors.voidBlack.withValues(alpha: 0.82),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            height: 74,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: people.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final person = people[index];
+                return SizedBox(
+                  width: 172,
+                  child: Container(
+                    padding: const EdgeInsets.all(9),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: person.color,
+                            border: Border.all(color: Colors.white, width: 2),
+                          ),
+                          child: Center(
+                            child: Text(
+                              person.name.characters.first,
+                              style: const TextStyle(
+                                color: SyncColors.voidBlack,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 9),
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                person.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: SyncColors.ink,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                '${person.distance} / ${person.heat} heat',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: SyncColors.muted,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${person.latitude.toStringAsFixed(4)}, ${person.longitude.toStringAsFixed(4)}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: SyncColors.mint,
+                                  fontSize: 10,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
           ),
         ],
